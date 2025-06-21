@@ -1,0 +1,13 @@
+[project]
+name = "world_script"
+version = "0.1.0"
+dependencies = [
+    "numpy",
+    "pyworld",
+    "pedalboard",
+    "soundfile"
+]
+
+[build-system]
+requires = ["uv"]
+build-backend = "uv.build"
