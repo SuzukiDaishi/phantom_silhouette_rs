@@ -1,5 +1,7 @@
 # Phantom Silhouette Rs
 
+※ これは失敗作です
+
 ## Building
 
 After installing [Rust](https://rustup.rs/), you can compile Phantom Silhouette Rs as follows:
