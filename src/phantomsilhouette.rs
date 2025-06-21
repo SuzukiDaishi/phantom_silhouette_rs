@@ -8,6 +8,13 @@ pub fn phantom_silhouette(f0: &[f64], sp: &[Vec<f64>], sr: usize) -> (Vec<f64>, 
     let mut sp_out = sp.to_vec();
     sp_out = low_frequency_suppression(sp_out, sr);
     sp_out = high_frequency_emphasis(sp_out, sr);
+    for row in &mut sp_out {
+        for val in row {
+            if *val == 0.0 {
+                *val = 1e-8;
+            }
+        }
+    }
     (f0_out, sp_out)
 }
 
@@ -17,10 +24,20 @@ pub fn phantom_silhouette_pink(
     sp: &[Vec<f64>],
     sr: usize,
 ) -> (Vec<f64>, Vec<Vec<f64>>) {
-    let f0_out = pink_noise(f0.len());
+    let mut f0_out = pink_noise(f0.len());
+    for v in &mut f0_out {
+        *v = (*v + 1.0) * 0.5;
+    }
     let mut sp_out = sp.to_vec();
     sp_out = low_frequency_suppression(sp_out, sr);
     sp_out = high_frequency_emphasis(sp_out, sr);
+    for row in &mut sp_out {
+        for val in row {
+            if *val == 0.0 {
+                *val = 1e-8;
+            }
+        }
+    }
     (f0_out, sp_out)
 }
 
