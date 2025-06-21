@@ -1,4 +1,8 @@
 use nih_plug::prelude::*;
+pub mod noise;
+pub mod phantomsilhouette;
+pub mod spectral;
+pub mod world;
 use std::sync::Arc;
 
 // This is a shortened version of the gain example with most comments removed, check out
@@ -7,22 +11,24 @@ use std::sync::Arc;
 
 struct PhantomSilhouetteRs {
     params: Arc<PhantomSilhouetteRsParams>,
+    sample_rate: f32,
 }
 
 #[derive(Params)]
 struct PhantomSilhouetteRsParams {
-    /// The parameter's ID is used to identify the parameter in the wrappred plugin API. As long as
-    /// these IDs remain constant, you can rename and reorder these fields as you wish. The
-    /// parameters are exposed to the host in the same order they were defined. In this case, this
-    /// gain parameter is stored as linear gain while the values are displayed in decibels.
-    #[id = "gain"]
-    pub gain: FloatParam,
+    /// Cross-fade between the unprocessed input and the whispered "Phantom
+    /// Silhouette" signal. `1.0` keeps only the dry signal while `0.0`
+    /// outputs only the whisper.
+    #[id = "mix"]
+    mix: FloatParam,
+    // Additional parameters were removed in the simplified implementation.
 }
 
 impl Default for PhantomSilhouetteRs {
     fn default() -> Self {
         Self {
             params: Arc::new(PhantomSilhouetteRsParams::default()),
+            sample_rate: 44100.0,
         }
     }
 }
@@ -30,29 +36,9 @@ impl Default for PhantomSilhouetteRs {
 impl Default for PhantomSilhouetteRsParams {
     fn default() -> Self {
         Self {
-            // This gain is stored as linear gain. NIH-plug comes with useful conversion functions
-            // to treat these kinds of parameters as if we were dealing with decibels. Storing this
-            // as decibels is easier to work with, but requires a conversion for every sample.
-            gain: FloatParam::new(
-                "Gain",
-                util::db_to_gain(0.0),
-                FloatRange::Skewed {
-                    min: util::db_to_gain(-30.0),
-                    max: util::db_to_gain(30.0),
-                    // This makes the range appear as if it was linear when displaying the values as
-                    // decibels
-                    factor: FloatRange::gain_skew_factor(-30.0, 30.0),
-                },
-            )
-            // Because the gain parameter is stored as linear gain instead of storing the value as
-            // decibels, we need logarithmic smoothing
-            .with_smoother(SmoothingStyle::Logarithmic(50.0))
-            .with_unit(" dB")
-            // There are many predefined formatters we can use here. If the gain was stored as
-            // decibels instead of as a linear gain value, we could have also used the
-            // `.with_step_size(0.1)` function to get internal rounding.
-            .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
-            .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+            mix: FloatParam::new("Mix", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit("")
+                .with_smoother(SmoothingStyle::Linear(50.0)),
         }
     }
 }
@@ -80,7 +66,6 @@ impl Plugin for PhantomSilhouetteRs {
         names: PortNames::const_default(),
     }];
 
-
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
@@ -102,12 +87,13 @@ impl Plugin for PhantomSilhouetteRs {
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
-        _buffer_config: &BufferConfig,
+        buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         // Resize buffers and perform other potentially expensive initialization operations here.
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
+        self.sample_rate = buffer_config.sample_rate;
         true
     }
 
@@ -122,12 +108,22 @@ impl Plugin for PhantomSilhouetteRs {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
-            // Smoothing is optionally built into the parameters themselves
-            let gain = self.params.gain.smoothed.next();
+        let mix = self.params.mix.smoothed.next();
 
-            for sample in channel_samples {
-                *sample *= gain;
+        let channels = buffer.as_slice();
+        if channels.is_empty() {
+            return ProcessStatus::Normal;
+        }
+
+        let input: Vec<f64> = channels[0].iter().map(|&s| s as f64).collect();
+        let processed = crate::world::phantom_silhouette_signal(&input, self.sample_rate as i32);
+        let processed: Vec<f32> = processed.iter().map(|&v| v as f32).collect();
+
+        for ch in channels.iter_mut() {
+            for (i, sample) in ch.iter_mut().enumerate() {
+                let dry = *sample;
+                let phantom = processed[i];
+                *sample = mix * dry + (1.0 - mix) * phantom;
             }
         }
 
